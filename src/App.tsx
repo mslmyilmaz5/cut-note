@@ -1,11 +1,19 @@
 import { useEffect } from 'react'
+import { CutHint } from './components/CutHint'
 import { ThemeReveal } from './components/ThemeReveal'
 import { TitleBar } from './components/TitleBar'
 import { Board } from './features/board/Board'
 import { NotesList } from './features/notes/NotesList'
 import { isTypingTarget, useBoardStore } from './features/notes/store'
-import { StyleDock } from './features/style/StyleDock'
 import { TemplatesPanel } from './features/templates/TemplatesPanel'
+
+const DOUBLE_TAB_MS = 350
+
+function isCaretInListItem(): boolean {
+  const node = window.getSelection()?.anchorNode
+  const el = node instanceof HTMLElement ? node : node?.parentElement
+  return Boolean(el?.closest('li'))
+}
 
 export default function App() {
   const hydrate = useBoardStore((s) => s.hydrate)
@@ -31,6 +39,41 @@ export default function App() {
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  // Double Tab toggles cut mode. Capture phase runs before the editor's own Tab handling.
+  useEffect(() => {
+    let lastTab = -Infinity
+    const onTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target instanceof HTMLElement ? event.target : null
+      const tag = target?.tagName
+      // Form fields keep normal Tab navigation.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      const inEditor = Boolean(target?.closest('.ProseMirror'))
+      // In lists Tab indents; quick repeated indents must not open cut mode.
+      if (inEditor && isCaretInListItem()) {
+        lastTab = -Infinity
+        return
+      }
+
+      const now = performance.now()
+      if (now - lastTab < DOUBLE_TAB_MS) {
+        lastTab = -Infinity
+        event.preventDefault()
+        event.stopPropagation()
+        const { cutMode: on, setCutMode: toggle } = useBoardStore.getState()
+        toggle(!on)
+        return
+      }
+      lastTab = now
+      // A single Tab in a note shouldn't move focus out of it.
+      if (inEditor) event.preventDefault()
+    }
+    window.addEventListener('keydown', onTab, true)
+    return () => window.removeEventListener('keydown', onTab, true)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -133,7 +176,7 @@ export default function App() {
         <Board />
         <NotesList />
         <TemplatesPanel />
-        <StyleDock />
+        <CutHint />
       </main>
       <ThemeReveal />
     </div>

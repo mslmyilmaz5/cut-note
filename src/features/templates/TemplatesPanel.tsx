@@ -46,6 +46,7 @@ export function TemplatesPanel() {
 
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
+  const [withNotes, setWithNotes] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export function TemplatesPanel() {
   }, [naming])
 
   const startNaming = () => {
-    setName(`${paneCount}-pane layout`)
+    setName(`${paneCount}-pane board`)
     setNaming(true)
   }
 
@@ -78,7 +79,7 @@ export function TemplatesPanel() {
       inputRef.current?.focus()
       return
     }
-    saveCurrentAsTemplate(trimmed)
+    saveCurrentAsTemplate(trimmed, withNotes)
     setNaming(false)
     setName('')
   }
@@ -108,8 +109,32 @@ export function TemplatesPanel() {
           <div className="templates-panel__save">
             {naming ? (
               <form className="templates-panel__name-form" onSubmit={commitSave}>
+                <div
+                  className="templates-panel__mode"
+                  role="radiogroup"
+                  aria-label="What to save"
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={withNotes}
+                    className={`templates-panel__mode-btn${withNotes ? ' templates-panel__mode-btn--on' : ''}`}
+                    onClick={() => setWithNotes(true)}
+                  >
+                    With notes
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!withNotes}
+                    className={`templates-panel__mode-btn${!withNotes ? ' templates-panel__mode-btn--on' : ''}`}
+                    onClick={() => setWithNotes(false)}
+                  >
+                    Layout only
+                  </button>
+                </div>
                 <label className="templates-panel__name-label" htmlFor="tpl-name">
-                  Layout name
+                  Name
                 </label>
                 <input
                   id="tpl-name"
@@ -130,7 +155,7 @@ export function TemplatesPanel() {
                     Cancel
                   </button>
                   <button type="submit" className="templates-panel__save-btn">
-                    Save layout
+                    Save
                   </button>
                 </div>
               </form>
@@ -140,18 +165,21 @@ export function TemplatesPanel() {
                 className="templates-panel__save-btn"
                 onClick={startNaming}
               >
-                Save current layout
+                Save current board
               </button>
             )}
             <p className="templates-panel__hint">
-              Name and save this {paneCount}-pane split as a reusable empty
-              template. Note content is not included.
+              {!naming
+                ? `Save this ${paneCount}-pane board with its notes, or just its layout.`
+                : withNotes
+                  ? `Saves the ${paneCount}-pane layout and every note's text and style.`
+                  : `Saves only the ${paneCount}-pane layout; notes start empty.`}
             </p>
           </div>
 
           <ul className="templates-panel__list">
             {templates.length === 0 ? (
-              <li className="templates-panel__empty">No saved layouts yet</li>
+              <li className="templates-panel__empty">Nothing saved yet</li>
             ) : (
               templates.map((tpl) => (
                 <li key={tpl.id} className="templates-item">
@@ -170,6 +198,7 @@ export function TemplatesPanel() {
                       <span className="templates-item__title">{tpl.name}</span>
                       <span className="templates-item__sub">
                         {tpl.paneCount} pane{tpl.paneCount === 1 ? '' : 's'} ·{' '}
+                        {tpl.withNotes ? 'with notes' : 'layout'} ·{' '}
                         {formatTime(tpl.createdAt)}
                       </span>
                     </span>

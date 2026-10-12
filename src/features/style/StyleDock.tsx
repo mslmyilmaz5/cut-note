@@ -1,61 +1,77 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDismiss } from '../../components/useDismiss'
 import { DEFAULT_NOTE_STYLE, type NoteStyle } from '../board/types'
 import {
   beginStyleDockInteraction,
   endStyleDockInteraction,
   getActiveEditorStyle,
+  getActiveEditorTextColor,
+  setActiveEditorColor,
+  setActiveEditorCustomColor,
   subscribeActiveEditor,
 } from '../editor/editorBridge'
 import {
   ALIGN_LABEL,
+  COLOR_CYCLE,
   COLOR_LABEL,
   FONT_LABEL,
   LIST_LABEL,
   SIZE_LABEL,
   WEIGHT_LABEL,
 } from '../notes/format'
+import { isPresetColor } from '../editor/styleCommands'
 import { useBoardStore, type StyleAction } from '../notes/store'
+import { cssColorToHex, normalizeHex } from './colorUtils'
 
 type DockItem = {
-  id: StyleAction
+  id: Exclude<StyleAction, 'color'>
   label: string
   value: string
   glyph: string
-  swatch?: string
 }
 
-const RADIUS = 148
+type SelectionStyle = { style: NoteStyle; textColor: string | undefined }
 
-function itemPosition(index: number, total: number) {
-  const start = (172 * Math.PI) / 180
-  const end = (8 * Math.PI) / 180
-  const t = total === 1 ? 0.5 : index / (total - 1)
-  const angle = start + (end - start) * t
-  return {
-    x: Math.cos(angle) * RADIUS,
-    y: -Math.sin(angle) * RADIUS,
-  }
-}
-
-function useSelectionStyle(focusedNoteId: string | null): NoteStyle {
-  const [style, setStyle] = useState<NoteStyle>(DEFAULT_NOTE_STYLE)
+function useSelectionStyle(focusedNoteId: string | null): SelectionStyle {
+  const [state, setState] = useState<SelectionStyle>({
+    style: DEFAULT_NOTE_STYLE,
+    textColor: undefined,
+  })
 
   useEffect(() => {
-    const sync = () => setStyle(getActiveEditorStyle(focusedNoteId))
+    const sync = () =>
+      setState({
+        style: getActiveEditorStyle(focusedNoteId),
+        textColor: getActiveEditorTextColor(focusedNoteId),
+      })
     sync()
     return subscribeActiveEditor(sync)
   }, [focusedNoteId])
 
-  return style
+  return state
 }
 
 export function StyleDock() {
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => setOpen(false), [])
+  useDismiss(rootRef, open, close)
   const cutMode = useBoardStore((s) => s.cutMode)
   const focusedNoteId = useBoardStore((s) => s.focusedNoteId)
   const cycleFocusedStyle = useBoardStore((s) => s.cycleFocusedStyle)
-  const style = useSelectionStyle(focusedNoteId)
+  const { style, textColor } = useSelectionStyle(focusedNoteId)
+  const isCustom =
+    Boolean(textColor) && !COLOR_CYCLE.some((color) => isPresetColor(textColor, color))
+  const currentHex = cssColorToHex(textColor)
+  // null = show the selection's color; a string = the user is typing a hex.
+  const [hexDraft, setHexDraft] = useState<string | null>(null)
+
+  const applyHex = (value: string) => {
+    const hex = normalizeHex(value)
+    if (hex) setActiveEditorCustomColor(hex, focusedNoteId)
+    setHexDraft(null)
+  }
 
   const items = useMemo<DockItem[]>(
     () => [
@@ -78,13 +94,6 @@ export function StyleDock() {
         glyph: 'B',
       },
       {
-        id: 'color',
-        label: 'Color',
-        value: COLOR_LABEL[style.color],
-        glyph: '',
-        swatch: style.color,
-      },
-      {
         id: 'align',
         label: 'Align',
         value: ALIGN_LABEL[style.align],
@@ -100,100 +109,140 @@ export function StyleDock() {
     [style],
   )
 
-  if (cutMode || !focusedNoteId) return null
+  const disabled = cutMode || !focusedNoteId
 
   return (
-    <div className={`style-dock${open ? ' style-dock--open' : ''}`}>
-      <div
-        className="style-dock__zone"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocusCapture={() => setOpen(true)}
-        onBlurCapture={(event) => {
-          if (
-            !event.currentTarget.contains(event.relatedTarget as Node | null)
-          ) {
-            setOpen(false)
-          }
-        }}
-        onPointerDownCapture={() => {
-          beginStyleDockInteraction()
-        }}
-        onPointerUpCapture={() => {
-          endStyleDockInteraction()
-        }}
-        onPointerCancelCapture={() => {
-          endStyleDockInteraction()
-        }}
+    // `.style-dock` is checked by the editor's blur handler to keep the selection.
+    <div
+      ref={rootRef}
+      className="style-dock"
+      onPointerDownCapture={() => beginStyleDockInteraction()}
+      onPointerUpCapture={() => endStyleDockInteraction()}
+      onPointerCancelCapture={() => endStyleDockInteraction()}
+    >
+      <button
+        type="button"
+        className={`toolbar-btn${open ? ' toolbar-btn--active' : ''}`}
+        aria-label="Text style"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Text style"
+        disabled={disabled}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setOpen((value) => !value)}
       >
-        <AnimatePresence>
-          {open ? (
-            <motion.div
-              className="style-dock__orbit"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.16 }}
-            >
-              <span className="style-dock__ring" aria-hidden />
-              {items.map((item, index) => {
-                const pos = itemPosition(index, items.length)
-                return (
-                  <motion.button
-                    key={item.id}
-                    type="button"
-                    className="style-dock__item"
-                    title={`${item.label}: ${item.value}`}
-                    aria-label={`${item.label}, ${item.value}`}
-                    initial={{ opacity: 0, x: 0, y: 24, scale: 0.7 }}
-                    animate={{ opacity: 1, x: pos.x, y: pos.y, scale: 1 }}
-                    exit={{ opacity: 0, x: 0, y: 16, scale: 0.75 }}
-                    transition={{
-                      type: 'spring',
-                      stiffness: 420,
-                      damping: 26,
-                      delay: index * 0.025,
-                    }}
-                    onMouseDown={(event) => {
-                      // Keep editor selection while clicking dock controls.
-                      event.preventDefault()
-                      beginStyleDockInteraction()
-                    }}
-                    onClick={() => {
-                      cycleFocusedStyle(item.id)
-                      endStyleDockInteraction()
-                    }}
-                  >
-                    {item.swatch ? (
-                      <span
-                        className={`style-dock__swatch style-dock__swatch--${item.swatch}`}
-                      />
-                    ) : (
-                      <span className="style-dock__glyph">{item.glyph}</span>
-                    )}
-                    <span className="style-dock__meta">
-                      <span className="style-dock__label">{item.label}</span>
-                      <span className="style-dock__value">{item.value}</span>
-                    </span>
-                  </motion.button>
-                )
-              })}
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-
-        <button
-          type="button"
-          className="style-dock__trigger"
-          aria-label="Formatting menu"
-          aria-expanded={open}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span className="style-dock__trigger-cap" />
-          <span className="style-dock__trigger-mark">Aa</span>
-        </button>
-      </div>
+        <span className="style-dock__mark">Aa</span>
+        <span
+          className={`style-dock__swatch style-dock__swatch--${isCustom ? 'custom' : style.color} style-dock__swatch--sm`}
+          style={isCustom ? { background: textColor } : undefined}
+          aria-hidden
+        />
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+          <path
+            d="M2.5 4 5 6.5 7.5 4"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <AnimatePresence>
+        {open && !disabled ? (
+          <motion.div
+            className="toolbar-menu toolbar-menu--center style-dock__menu"
+            role="menu"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.14 }}
+          >
+            {items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                className="toolbar-menu__item style-dock__item"
+                title={`Change ${item.label.toLowerCase()}`}
+                onMouseDown={(event) => {
+                  // Keep editor selection while clicking style controls.
+                  event.preventDefault()
+                  beginStyleDockInteraction()
+                }}
+                onClick={() => {
+                  cycleFocusedStyle(item.id)
+                  endStyleDockInteraction()
+                }}
+              >
+                <span className="style-dock__glyph">{item.glyph}</span>
+                <span className="style-dock__label">{item.label}</span>
+                <span className="style-dock__value">{item.value}</span>
+              </button>
+            ))}
+            <div className="style-dock__colors" role="group" aria-label="Text color">
+              <span className="style-dock__colors-label">Color</span>
+              {COLOR_CYCLE.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={`style-dock__color${isPresetColor(textColor, color) ? ' style-dock__color--on' : ''}`}
+                  aria-label={COLOR_LABEL[color]}
+                  aria-pressed={isPresetColor(textColor, color)}
+                  title={COLOR_LABEL[color]}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    beginStyleDockInteraction()
+                  }}
+                  onClick={() => {
+                    setActiveEditorColor(color, focusedNoteId)
+                    endStyleDockInteraction()
+                  }}
+                >
+                  <span className={`style-dock__swatch style-dock__swatch--${color}`} />
+                </button>
+              ))}
+            </div>
+            <div className="style-dock__custom">
+              <span className="style-dock__colors-label">Custom</span>
+              <label
+                className={`style-dock__picker${isCustom ? ' style-dock__picker--on' : ''}`}
+                title="Pick any color"
+              >
+                <span
+                  className="style-dock__picker-fill"
+                  style={{ background: currentHex }}
+                />
+                <input
+                  type="color"
+                  aria-label="Pick any color"
+                  value={currentHex}
+                  // Fires continuously while dragging in the picker.
+                  onChange={(event) =>
+                    setActiveEditorCustomColor(event.target.value, focusedNoteId)
+                  }
+                />
+              </label>
+              <input
+                className="style-dock__hex"
+                aria-label="Hex color"
+                spellCheck={false}
+                maxLength={7}
+                value={hexDraft ?? currentHex}
+                onChange={(event) => setHexDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    applyHex(event.currentTarget.value)
+                  }
+                }}
+                onBlur={(event) => {
+                  if (hexDraft !== null) applyHex(event.currentTarget.value)
+                }}
+              />
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }

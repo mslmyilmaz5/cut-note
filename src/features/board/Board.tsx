@@ -1,4 +1,3 @@
-import { motion } from 'motion/react'
 import type { CSSProperties } from 'react'
 import { useBoardStore } from '../notes/store'
 import { Pane } from './Pane'
@@ -21,9 +20,14 @@ function PaneTree({ node, gesture }: TreeProps) {
 
   if (node.type === 'leaf') {
     const note = notes[node.noteId]
-    if (!note) return null
+    // Missing note would leave an empty flex hole (looks like a black screen).
+    if (!note) {
+      return <div className="pane pane--empty" aria-hidden />
+    }
     return (
       <Pane
+        // A different note (template, import, undo) gets a fresh editor.
+        key={note.id}
         note={note}
         focused={focusedNoteId === note.id}
         cutMode={cutMode}
@@ -37,10 +41,8 @@ function PaneTree({ node, gesture }: TreeProps) {
   }
 
   return (
-    <motion.div
+    <div
       className={`pane-split pane-split--${node.direction}`}
-      layout
-      transition={{ type: 'spring', stiffness: 320, damping: 34, mass: 0.7 }}
       style={
         {
           '--split-ratio': String(node.ratio),
@@ -54,7 +56,7 @@ function PaneTree({ node, gesture }: TreeProps) {
       <div className="pane-split__child pane-split__child--second">
         <PaneTree node={node.second} gesture={gesture} />
       </div>
-    </motion.div>
+    </div>
   )
 }
 

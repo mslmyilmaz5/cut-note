@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { BoardTheme } from '../features/board/types'
 import { useBoardStore } from '../features/notes/store'
 
@@ -61,17 +61,26 @@ type BurstProps = {
 
 function ThemeBurst({ to, onSwap, onDone }: BurstProps) {
   const [phase, setPhase] = useState<'burst' | 'veil' | 'fade'>('burst')
+  const finished = useRef(false)
   const targetScale = coverScale()
   const particles = buildParticles()
 
   useEffect(() => {
+    finished.current = false
+
+    const finish = () => {
+      if (finished.current) return
+      finished.current = true
+      onSwap()
+      onDone()
+    }
+
     const swapTimer = window.setTimeout(() => {
       onSwap()
     }, GROW_S * SWAP_AT * 1000)
 
     const veilTimer = window.setTimeout(() => {
       setPhase('veil')
-      // Guarantee theme is applied under the solid cover.
       onSwap()
     }, (PARTICLE_START_S + PARTICLE_HOLD_S) * 1000)
 
@@ -80,14 +89,20 @@ function ThemeBurst({ to, onSwap, onDone }: BurstProps) {
     }, (PARTICLE_START_S + PARTICLE_HOLD_S + VEIL_IN_S + VEIL_HOLD_S) * 1000)
 
     const doneTimer = window.setTimeout(() => {
-      onDone()
+      finish()
     }, (PARTICLE_START_S + PARTICLE_HOLD_S + VEIL_IN_S + VEIL_HOLD_S + FADE_S) * 1000)
+
+    // Hard safety: never leave a stuck black/white veil on screen.
+    const safetyTimer = window.setTimeout(() => {
+      finish()
+    }, 4000)
 
     return () => {
       window.clearTimeout(swapTimer)
       window.clearTimeout(veilTimer)
       window.clearTimeout(fadeTimer)
       window.clearTimeout(doneTimer)
+      window.clearTimeout(safetyTimer)
     }
   }, [onSwap, onDone])
 
@@ -95,7 +110,6 @@ function ThemeBurst({ to, onSwap, onDone }: BurstProps) {
 
   return (
     <div className={`theme-reveal theme-reveal--${to}`} aria-hidden>
-      {/* Solid full-screen cover — ensures every pixel becomes the new color */}
       <motion.div
         className="theme-reveal__veil"
         initial={{ opacity: 0 }}

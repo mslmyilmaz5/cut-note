@@ -3,15 +3,29 @@ import { collectNoteIds } from '../board/splitTree'
 import { DEFAULT_NOTE_STYLE, type Note, type PaneNode } from '../board/types'
 import type { TemplatePane } from './types'
 
-export function boardToTemplateLayout(root: PaneNode): TemplatePane {
-  if (root.type === 'leaf') return { type: 'leaf' }
+/** Pass `notes` to keep each pane's content in the template. */
+export function boardToTemplateLayout(
+  root: PaneNode,
+  notes?: Record<string, Note>,
+): TemplatePane {
+  if (root.type === 'leaf') {
+    const note = notes?.[root.noteId]
+    return note
+      ? { type: 'leaf', body: note.body, style: { ...note.style } }
+      : { type: 'leaf' }
+  }
   return {
     type: 'split',
     direction: root.direction,
     ratio: root.ratio,
-    first: boardToTemplateLayout(root.first),
-    second: boardToTemplateLayout(root.second),
+    first: boardToTemplateLayout(root.first, notes),
+    second: boardToTemplateLayout(root.second, notes),
   }
+}
+
+export function templateHasNotes(layout: TemplatePane): boolean {
+  if (layout.type === 'leaf') return typeof layout.body === 'string'
+  return templateHasNotes(layout.first) || templateHasNotes(layout.second)
 }
 
 export function countTemplatePanes(layout: TemplatePane): number {
@@ -34,10 +48,10 @@ export function instantiateTemplate(layout: TemplatePane): {
       if (!firstId) firstId = id
       notes[id] = {
         id,
-        body: '',
+        body: node.body ?? '',
         createdAt: now,
         updatedAt: now,
-        style: { ...DEFAULT_NOTE_STYLE },
+        style: { ...DEFAULT_NOTE_STYLE, ...node.style },
       }
       return { type: 'leaf', noteId: id }
     }

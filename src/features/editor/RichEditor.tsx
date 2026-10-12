@@ -98,13 +98,14 @@ export function RichEditor({
     }
   }, [editor, noteId])
 
+  // `editor` can briefly be a destroyed instance while useEditor swaps it out.
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed) return
     editor.setEditable(editable)
   }, [editor, editable])
 
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed) return
     const next = toEditorHtml(body)
     if (editor.getHTML() === next) return
     // Avoid clobbering local marks while the user is editing this note.
@@ -113,7 +114,7 @@ export function RichEditor({
   }, [editor, body, noteId])
 
   useEffect(() => {
-    if (!editor || !autofocus) return
+    if (!editor || editor.isDestroyed || !autofocus) return
     setActiveEditor(noteId, editor)
     editor.commands.focus('end')
   }, [autofocus, editor, noteId])
@@ -122,7 +123,7 @@ export function RichEditor({
 
   return (
     <div className="pane-editor-host">
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="pane-editor-content" />
     </div>
   )
 }

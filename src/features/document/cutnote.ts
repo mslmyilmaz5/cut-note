@@ -1,6 +1,10 @@
 import type { BoardSnapshot, BoardTheme, Note, PaneNode } from '../board/types'
 import { normalizeNote } from '../notes/format'
-import { boardToTemplateLayout, countTemplatePanes } from '../templates/layout'
+import {
+  boardToTemplateLayout,
+  countTemplatePanes,
+  templateHasNotes,
+} from '../templates/layout'
 import type { BoardTemplate, TemplatePane } from '../templates/types'
 
 export const CUTNOTE_EXTENSION = 'cutnote'
@@ -133,7 +137,7 @@ export function parseCutNote(raw: string): CutNoteDocument {
   }
 }
 
-/** Keep only layout fields; strip any older content-bearing template payloads. */
+/** Keep only template fields; strip older `root`/`notes` payloads (layout only). */
 export function normalizeTemplate(raw: BoardTemplate & {
   root?: PaneNode
   notes?: unknown
@@ -152,6 +156,7 @@ export function normalizeTemplate(raw: BoardTemplate & {
     name: raw.name,
     createdAt: raw.createdAt,
     paneCount: countTemplatePanes(layout),
+    withNotes: templateHasNotes(layout),
     layout,
   }
 }

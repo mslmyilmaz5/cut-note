@@ -40,6 +40,8 @@ const HISTORY_LIMIT = 50
 
 export type StyleAction = 'font' | 'size' | 'weight' | 'align' | 'list' | 'color'
 
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+
 type BoardStore = {
   root: PaneNode
   notes: Record<string, Note>
@@ -53,6 +55,9 @@ type BoardStore = {
   templatesOpen: boolean
   templates: BoardTemplate[]
   hydrated: boolean
+  /** Autosave state of the board (not `.cutnote` exports). */
+  saveStatus: SaveStatus
+  lastSavedAt: number | null
   past: BoardSnapshot[]
   future: BoardSnapshot[]
   hydrate: () => Promise<void>
@@ -67,7 +72,7 @@ type BoardStore = {
   clearCutFlash: () => void
   setNotesOpen: (open: boolean) => void
   setTemplatesOpen: (open: boolean) => void
-  saveCurrentAsTemplate: (name: string) => void
+  saveCurrentAsTemplate: (name: string, withNotes: boolean) => void
   saveCutNoteDocument: (name: string) => Promise<boolean>
   importCutNoteDocument: () => Promise<boolean>
   applyTemplate: (id: string) => void
@@ -116,11 +121,24 @@ function snapshotOf(state: BoardSnapshot): BoardSnapshot {
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
+let persistRun = 0
+
 function schedulePersist(get: () => BoardStore) {
   if (persistTimer) clearTimeout(persistTimer)
+  if (get().saveStatus !== 'saving') useBoardStore.setState({ saveStatus: 'saving' })
   persistTimer = setTimeout(() => {
+    persistTimer = null
+    const run = ++persistRun
     const { root, notes, focusedNoteId, theme } = get()
-    void saveBoard({ root, notes, focusedNoteId, theme })
+    void saveBoard({ root, notes, focusedNoteId, theme }).then((ok) => {
+      // A newer save is pending or running; let it report.
+      if (run !== persistRun || persistTimer !== null) return
+      useBoardStore.setState(
+        ok
+          ? { saveStatus: 'saved', lastSavedAt: Date.now() }
+          : { saveStatus: 'error' },
+      )
+    })
   }, 300)
 }
 
@@ -139,6 +157,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   templatesOpen: false,
   templates: [],
   hydrated: false,
+  saveStatus: 'idle',
+  lastSavedAt: null,
   past: [],
   future: [],
   documentError: null,
@@ -226,14 +246,18 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       notesOpen: open ? false : get().notesOpen,
     }),
 
-  saveCurrentAsTemplate: (name) => {
+  saveCurrentAsTemplate: (name, withNotes) => {
     const state = get()
-    const layout = boardToTemplateLayout(state.root)
+    const layout = boardToTemplateLayout(
+      state.root,
+      withNotes ? state.notes : undefined,
+    )
     const template: BoardTemplate = {
       id: createId(),
       name,
       createdAt: Date.now(),
       paneCount: countTemplatePanes(layout),
+      withNotes,
       layout,
     }
     const templates = [template, ...state.templates]
@@ -419,7 +443,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   deleteNote: (id) => {
     const state = get()
     const ids = collectNoteIds(state.root)
-    if (ids.length <= 1 || !state.notes[id]) return
+    if (ids.length <= 1 || !ids.includes(id) || !state.notes[id]) return
 
     const past = [
       ...state.past,
@@ -433,8 +457,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     const nextRoot = removeNoteFromTree(state.root, id)
     if (!nextRoot) return
 
-    const { [id]: _removed, ...notes } = state.notes
     const remaining = collectNoteIds(nextRoot)
+    if (remaining.length === 0) return
+
+    // Keep notes map aligned with the live tree — orphans create empty black panes.
+    const notes = Object.fromEntries(
+      remaining
+        .map((noteId) => {
+          const note = noteId === id ? undefined : state.notes[noteId]
+          return note ? ([noteId, note] as const) : null
+        })
+        .filter((entry): entry is readonly [string, Note] => entry !== null),
+    )
+
+    if (remaining.some((noteId) => !notes[noteId])) return
+
     const focusedNoteId = remaining.includes(state.focusedNoteId)
       ? state.focusedNoteId
       : remaining[0]
@@ -443,6 +480,10 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       root: nextRoot,
       notes,
       focusedNoteId,
+      cutAnchor:
+        state.cutAnchor?.noteId === id ? null : state.cutAnchor,
+      cutPreview:
+        state.cutPreview?.noteId === id ? null : state.cutPreview,
       past,
       future: [],
     })

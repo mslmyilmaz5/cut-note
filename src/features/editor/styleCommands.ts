@@ -54,9 +54,10 @@ function cssToFont(value: string | undefined): NoteFont {
   if (!value) return DEFAULT_NOTE_STYLE.font
   const lower = value.toLowerCase()
   if (lower.includes('fraunces')) return 'display'
-  if (lower.includes('serif')) return 'serif'
   if (lower.includes('mono') || lower.includes('menlo')) return 'mono'
+  // Check sans first: the sans stack ends in "sans-serif".
   if (lower.includes('plex sans') || lower.includes('sans')) return 'sans'
+  if (lower.includes('serif')) return 'serif'
   return DEFAULT_NOTE_STYLE.font
 }
 
@@ -113,6 +114,33 @@ export function readActiveStyle(editor: Editor): NoteStyle {
 function withSelection(editor: Editor) {
   // Keep the current selection; only restore focus without scrolling.
   return editor.chain().focus(undefined, { scrollIntoView: false })
+}
+
+/** Apply one specific color to the selection (or the word under the caret). */
+export function setEditorColor(editor: Editor, color: NoteColor): void {
+  ensureWordSelection(editor)
+  withSelection(editor).setColor(COLOR_CSS[color]).run()
+}
+
+/**
+ * Apply any CSS color (e.g. `#e07a5f`). Doesn't refocus the editor so a color
+ * picker or hex field can stay focused while the color updates live.
+ */
+export function setEditorCustomColor(editor: Editor, css: string): void {
+  ensureWordSelection(editor)
+  editor.chain().setColor(css).run()
+}
+
+/** Raw CSS color at the selection, or undefined for the default ink. */
+export function readActiveTextColor(editor: Editor): string | undefined {
+  const { color } = editor.getAttributes('textStyle') as { color?: string }
+  return color || undefined
+}
+
+/** True when `css` is exactly one of the preset colors. */
+export function isPresetColor(css: string | undefined, color: NoteColor): boolean {
+  if (!css) return color === 'default'
+  return COLOR_CSS[color] === css
 }
 
 export function cycleEditorStyle(editor: Editor, action: StyleAction): void {

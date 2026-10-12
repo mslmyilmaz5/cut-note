@@ -2,10 +2,8 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, type PointerEvent as ReactPointerEvent } from 'react'
 import { RichEditor } from '../editor/RichEditor'
 import { useBoardStore } from '../notes/store'
-import { collectNoteIds } from './splitTree'
 import { CutAnchorMarker } from './CutAnchorMarker'
 import { CutOverlay } from './CutOverlay'
-import { PaneDeleteCorner } from './PaneDeleteCorner'
 import type { CutAnchor, CutPreview, Note } from './types'
 
 type Props = {
@@ -37,10 +35,6 @@ export function Pane({
 }: Props) {
   const cutFlashNoteId = useBoardStore((s) => s.cutFlashNoteId)
   const clearCutFlash = useBoardStore((s) => s.clearCutFlash)
-  const deleteNote = useBoardStore((s) => s.deleteNote)
-  const canDelete = useBoardStore(
-    (s) => collectNoteIds(s.root).length > 1,
-  )
   const previewForPane = cutPreview?.noteId === note.id ? cutPreview : null
   const showFlash = cutFlashNoteId === note.id
 
@@ -51,15 +45,8 @@ export function Pane({
   }, [showFlash, clearCutFlash])
 
   return (
-    <motion.div
+    <div
       className={`pane${focused ? ' pane--focused' : ''}${cutMode ? ' pane--cut' : ''}${cutAnchor ? ' pane--anchored' : ''}`}
-      layout
-      initial={{ opacity: 0.55 }}
-      animate={{ opacity: 1 }}
-      transition={{
-        layout: { type: 'spring', stiffness: 320, damping: 34, mass: 0.7 },
-        opacity: { duration: 0.28 },
-      }}
       onPointerDown={(event) => {
         if (cutMode) onPointerDown(event, note.id)
       }}
@@ -76,9 +63,6 @@ export function Pane({
         onFocusNote={onFocus}
         onChangeBody={onChange}
       />
-      {!cutMode && canDelete ? (
-        <PaneDeleteCorner onDelete={() => deleteNote(note.id)} />
-      ) : null}
       <AnimatePresence>
         {cutMode && cutAnchor ? (
           <CutAnchorMarker
@@ -97,6 +81,6 @@ export function Pane({
           transition={{ duration: 0.32, ease: 'easeOut' }}
         />
       ) : null}
-    </motion.div>
+    </div>
   )
 }

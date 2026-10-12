@@ -27,18 +27,20 @@ export async function loadBoard(): Promise<BoardSnapshot | null> {
   }
 }
 
-export async function saveBoard(snapshot: BoardSnapshot): Promise<void> {
+/** Resolves false (never throws) so editing continues when saving fails. */
+export async function saveBoard(snapshot: BoardSnapshot): Promise<boolean> {
   try {
     if (isTauri()) {
       const { load } = await import('@tauri-apps/plugin-store')
       const store = await load(STORE_PATH, { autoSave: true, defaults: {} })
       await store.set(BOARD_KEY, snapshot)
       await store.save()
-      return
+      return true
     }
     localStorage.setItem(LOCAL_BOARD_KEY, JSON.stringify(snapshot))
+    return true
   } catch {
-    // Persistence failures should not break editing.
+    return false
   }
 }
 
