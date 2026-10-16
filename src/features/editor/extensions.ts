@@ -5,6 +5,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextStyle } from '@tiptap/extension-text-style'
 import StarterKit from '@tiptap/starter-kit'
+import { LineHeight } from './lineHeight'
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -110,6 +111,7 @@ export function createEditorExtensions(placeholder: string) {
     FontFamily,
     FontSize,
     FontWeight,
+    LineHeight,
     Color,
     TextAlign.configure({
       types: ['paragraph', 'heading'],

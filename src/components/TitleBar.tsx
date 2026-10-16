@@ -7,8 +7,11 @@ import {
 } from 'react'
 import { useBoardStore } from '../features/notes/store'
 import { StyleDock } from '../features/style/StyleDock'
+import { useFullscreen } from '../hooks/useFullscreen'
+import { useWindowDrag } from '../hooks/useWindowDrag'
 import { SaveBadge } from './SaveBadge'
 import { useDismiss } from './useDismiss'
+import { NewNoteDialog } from './NewNoteDialog'
 
 function ScissorsIcon({ active }: { active: boolean }) {
   return (
@@ -80,6 +83,12 @@ function TemplateIcon() {
 }
 
 export function TitleBar() {
+  const canUndo = useBoardStore((s) => s.past.length > 0)
+  const canRedo = useBoardStore((s) => s.future.length > 0)
+  const undoBoard = useBoardStore((s) => s.undo)
+  const redoBoard = useBoardStore((s) => s.redo)
+  const focusModeNoteId = useBoardStore((s) => s.focusModeNoteId)
+  const exitFocus = useBoardStore((s) => s.exitFocus)
   const cutMode = useBoardStore((s) => s.cutMode)
   const notesOpen = useBoardStore((s) => s.notesOpen)
   const templatesOpen = useBoardStore((s) => s.templatesOpen)
@@ -94,10 +103,13 @@ export function TitleBar() {
   const importCutNoteDocument = useBoardStore((s) => s.importCutNoteDocument)
   const clearDocumentError = useBoardStore((s) => s.clearDocumentError)
   const setSaveMenuOpen = useBoardStore((s) => s.setSaveMenuOpen)
+  const fullscreen = useFullscreen()
+  const onTitlebarPointerDown = useWindowDrag(!fullscreen)
 
   const [name, setName] = useState('Untitled')
   const [busy, setBusy] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
+  const [newNoteOpen, setNewNoteOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const saveWrapRef = useRef<HTMLDivElement>(null)
   const closeFileMenu = useCallback(() => setFileMenuOpen(false), [])
@@ -150,11 +162,12 @@ export function TitleBar() {
   }
 
   return (
-    <header className="titlebar" data-tauri-drag-region>
+    <header
+      className="titlebar"
+      data-tauri-drag-region
+      onPointerDown={onTitlebarPointerDown}
+    >
       <div className="titlebar__group titlebar__group--start" data-tauri-drag-region>
-        <div className="titlebar__brand" data-tauri-drag-region>
-          Cut Note
-        </div>
         <div className="titlebar__save-wrap" ref={saveWrapRef}>
           <button
             type="button"
@@ -172,6 +185,19 @@ export function TitleBar() {
           </button>
           {fileMenuOpen ? (
             <div className="toolbar-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="toolbar-menu__item"
+                onClick={() => {
+                  setFileMenuOpen(false)
+                  setSaveMenuOpen(false)
+                  clearDocumentError()
+                  setNewNoteOpen(true)
+                }}
+              >
+                <span className="toolbar-menu__label">New Note</span>
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -232,7 +258,12 @@ export function TitleBar() {
             </form>
           ) : null}
         </div>
-        {documentError && !saving ? (
+        <span className="titlebar__divider" aria-hidden />
+        <div className="titlebar__brand" data-tauri-drag-region>
+          Cut Note
+        </div>
+        <StyleDock />
+        {documentError && !saving && !newNoteOpen ? (
           <span className="titlebar__error" role="alert" title={documentError}>
             Import failed
           </span>
@@ -240,7 +271,9 @@ export function TitleBar() {
       </div>
 
       <div className="titlebar__group titlebar__group--center" data-tauri-drag-region>
-        <StyleDock />
+        <button type="button" className="toolbar-btn toolbar-btn--icon" aria-label="Undo board" title="Undo board change" disabled={!canUndo} onClick={undoBoard}>↶</button>
+        <button type="button" className="toolbar-btn toolbar-btn--icon" aria-label="Redo board" title="Redo board change" disabled={!canRedo} onClick={redoBoard}>↷</button>
+        {focusModeNoteId && <button type="button" className="toolbar-btn focus-return-btn" aria-label="Back to board" onClick={exitFocus} title="Back to board (Esc)">↙ <span>Back to board</span></button>}
         {cutMode ? (
           // Cut mode has no toolbar button (double Tab / ⌘⇧C); show it's on.
           <button
@@ -289,6 +322,7 @@ export function TitleBar() {
           <NotesIcon />
         </button>
       </div>
+      {newNoteOpen && <NewNoteDialog onClose={() => setNewNoteOpen(false)} />}
     </header>
   )
 }

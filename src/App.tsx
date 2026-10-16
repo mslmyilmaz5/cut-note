@@ -6,6 +6,7 @@ import { Board } from './features/board/Board'
 import { NotesList } from './features/notes/NotesList'
 import { isTypingTarget, useBoardStore } from './features/notes/store'
 import { TemplatesPanel } from './features/templates/TemplatesPanel'
+import { useFullscreen } from './hooks/useFullscreen'
 
 const DOUBLE_TAB_MS = 350
 
@@ -35,10 +36,35 @@ export default function App() {
   const importCutNoteDocument = useBoardStore((s) => s.importCutNoteDocument)
   const setSaveMenuOpen = useBoardStore((s) => s.setSaveMenuOpen)
   const saveMenuOpen = useBoardStore((s) => s.saveMenuOpen)
+  const fullscreen = useFullscreen()
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  // macOS delivers double-clicked .cutnote files through the native open event.
+  useEffect(() => {
+    if (!hydrated || !('__TAURI_INTERNALS__' in window)) return
+    let stop = false
+    let unlisten: (() => void) | undefined
+    const drain = async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const raws = await invoke<string[]>('take_pending_cutnotes')
+      const last = raws.at(-1)
+      if (last) useBoardStore.getState().openCutNoteRaw(last)
+    }
+    void import('@tauri-apps/api/event').then(async ({ listen }) => {
+      if (stop) return
+      unlisten = await listen('cutnote-open-ready', () => {
+        void drain()
+      })
+      await drain()
+    })
+    return () => {
+      stop = true
+      unlisten?.()
+    }
+  }, [hydrated])
 
   // Double Tab toggles cut mode. Capture phase runs before the editor's own Tab handling.
   useEffect(() => {
@@ -47,6 +73,7 @@ export default function App() {
       if (event.key !== 'Tab') return
       if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return
       const target = event.target instanceof HTMLElement ? event.target : null
+      if (target?.closest('[role="dialog"]')) return
       const tag = target?.tagName
       // Form fields keep normal Tab navigation.
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -77,7 +104,15 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]')) return
       const meta = event.metaKey || event.ctrlKey
+
+      if (meta && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        const state = useBoardStore.getState()
+        state.toggleFocus(state.focusedNoteId)
+        return
+      }
 
       if (event.key === 'Escape') {
         if (cutMode && (cutAnchor || cutPreview)) {
@@ -95,6 +130,9 @@ export default function App() {
           event.preventDefault()
         } else if (notesOpen) {
           setNotesOpen(false)
+          event.preventDefault()
+        } else if (useBoardStore.getState().focusModeNoteId) {
+          useBoardStore.getState().exitFocus()
           event.preventDefault()
         }
         return
@@ -170,7 +208,9 @@ export default function App() {
   }
 
   return (
-    <div className={`app app--theme-${theme}${cutMode ? ' app--cut' : ''}`}>
+    <div
+      className={`app app--theme-${theme}${cutMode ? ' app--cut' : ''}${fullscreen ? ' app--fullscreen' : ''}`}
+    >
       <TitleBar />
       <main className="app__main">
         <Board />

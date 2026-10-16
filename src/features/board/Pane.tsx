@@ -4,6 +4,7 @@ import { RichEditor } from '../editor/RichEditor'
 import { useBoardStore } from '../notes/store'
 import { CutAnchorMarker } from './CutAnchorMarker'
 import { CutOverlay } from './CutOverlay'
+import { PaneActions } from './PaneActions'
 import type { CutAnchor, CutPreview, Note } from './types'
 
 type Props = {
@@ -54,6 +55,7 @@ export function Pane({
       onPointerUp={cutMode ? onPointerUp : undefined}
       onPointerCancel={cutMode ? onPointerCancel : undefined}
     >
+      {!cutMode && <PaneActions noteId={note.id} />}
       <RichEditor
         noteId={note.id}
         body={note.body}

@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { collectNoteIds } from '../board/splitTree'
 import { useBoardStore } from '../notes/store'
+import { isBuiltinTemplateId } from './builtins'
 import type { TemplatePane } from './types'
 
 function LayoutPreview({ layout }: { layout: TemplatePane }) {
@@ -181,38 +182,47 @@ export function TemplatesPanel() {
             {templates.length === 0 ? (
               <li className="templates-panel__empty">Nothing saved yet</li>
             ) : (
-              templates.map((tpl) => (
-                <li key={tpl.id} className="templates-item">
-                  <button
-                    type="button"
-                    className="templates-item__main"
-                    onClick={() => {
-                      applyTemplate(tpl.id)
-                      setTemplatesOpen(false)
-                    }}
-                  >
-                    <span className="tpl-preview" aria-hidden>
-                      <LayoutPreview layout={tpl.layout} />
-                    </span>
-                    <span className="templates-item__meta">
-                      <span className="templates-item__title">{tpl.name}</span>
-                      <span className="templates-item__sub">
-                        {tpl.paneCount} pane{tpl.paneCount === 1 ? '' : 's'} ·{' '}
-                        {tpl.withNotes ? 'with notes' : 'layout'} ·{' '}
-                        {formatTime(tpl.createdAt)}
+              templates.map((tpl) => {
+                const builtin = isBuiltinTemplateId(tpl.id)
+                return (
+                  <li key={tpl.id} className="templates-item">
+                    <button
+                      type="button"
+                      className="templates-item__main"
+                      onClick={() => {
+                        applyTemplate(tpl.id)
+                        setTemplatesOpen(false)
+                      }}
+                    >
+                      <span className="tpl-preview" aria-hidden>
+                        <LayoutPreview layout={tpl.layout} />
                       </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="templates-item__delete"
-                    aria-label={`Delete ${tpl.name}`}
-                    onClick={() => deleteTemplate(tpl.id)}
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))
+                      <span className="templates-item__meta">
+                        <span className="templates-item__title">{tpl.name}</span>
+                        <span className="templates-item__sub">
+                          {tpl.paneCount} pane{tpl.paneCount === 1 ? '' : 's'} ·{' '}
+                          {builtin
+                            ? 'built-in'
+                            : tpl.withNotes
+                              ? 'with notes'
+                              : 'layout'}
+                          {builtin ? '' : ` · ${formatTime(tpl.createdAt)}`}
+                        </span>
+                      </span>
+                    </button>
+                    {builtin ? null : (
+                      <button
+                        type="button"
+                        className="templates-item__delete"
+                        aria-label={`Delete ${tpl.name}`}
+                        onClick={() => deleteTemplate(tpl.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </li>
+                )
+              })
             )}
           </ul>
         </motion.aside>

@@ -65,22 +65,32 @@ export const COLOR_LABEL: Record<NoteColor, string> = {
   moss: 'Moss',
 }
 
+function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback
+}
+
 export function normalizeStyle(style?: Partial<NoteStyle> | null): NoteStyle {
   return {
-    font: style?.font ?? DEFAULT_NOTE_STYLE.font,
-    size: style?.size ?? DEFAULT_NOTE_STYLE.size,
-    weight: style?.weight ?? DEFAULT_NOTE_STYLE.weight,
-    align: style?.align ?? DEFAULT_NOTE_STYLE.align,
-    list: style?.list ?? DEFAULT_NOTE_STYLE.list,
-    color: style?.color ?? DEFAULT_NOTE_STYLE.color,
+    font: pick(style?.font, FONT_CYCLE, DEFAULT_NOTE_STYLE.font),
+    size: pick(style?.size, SIZE_CYCLE, DEFAULT_NOTE_STYLE.size),
+    weight: pick(style?.weight, WEIGHT_CYCLE, DEFAULT_NOTE_STYLE.weight),
+    align: pick(style?.align, ALIGN_CYCLE, DEFAULT_NOTE_STYLE.align),
+    list: pick(style?.list, LIST_CYCLE, DEFAULT_NOTE_STYLE.list),
+    color: pick(style?.color, COLOR_CYCLE, DEFAULT_NOTE_STYLE.color),
   }
 }
 
 export function normalizeNote(
-  note: Omit<Note, 'style'> & { style?: Partial<NoteStyle> | null },
+  note: Omit<Note, 'style'> & { style?: Partial<NoteStyle> | null; body?: unknown },
 ): Note {
+  const now = Date.now()
   return {
-    ...note,
+    id: typeof note.id === 'string' && note.id ? note.id : 'note',
+    body: typeof note.body === 'string' ? note.body : '',
+    createdAt: typeof note.createdAt === 'number' && Number.isFinite(note.createdAt) ? note.createdAt : now,
+    updatedAt: typeof note.updatedAt === 'number' && Number.isFinite(note.updatedAt) ? note.updatedAt : now,
     style: normalizeStyle(note.style),
   }
 }

@@ -5,10 +5,13 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "store:default",
     "dialog:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
+    "allow-take-pending-cutnotes",
     {
       "identifier": "fs:scope",
       "allow": [

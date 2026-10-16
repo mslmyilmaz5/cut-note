@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-take-pending-cutnotes"
+description = "Enables the take_pending_cutnotes command without any pre-configured scope."
+commands.allow = ["take_pending_cutnotes"]
+
+[[permission]]
+identifier = "deny-take-pending-cutnotes"
+description = "Denies the take_pending_cutnotes command without any pre-configured scope."
+commands.deny = ["take_pending_cutnotes"]

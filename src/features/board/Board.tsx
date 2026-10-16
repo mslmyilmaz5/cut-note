@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { useBoardStore } from '../notes/store'
 import { Pane } from './Pane'
 import type { PaneNode } from './types'
+import { collectNoteIds } from './splitTree'
 import { useCutGesture } from './useCutGesture'
 
 type TreeProps = {
@@ -10,6 +11,8 @@ type TreeProps = {
 }
 
 function PaneTree({ node, gesture }: TreeProps) {
+  const focusModeNoteId = useBoardStore((s) => s.focusModeNoteId)
+  const boardRevision = useBoardStore((s) => s.boardRevision)
   const notes = useBoardStore((s) => s.notes)
   const focusedNoteId = useBoardStore((s) => s.focusedNoteId)
   const cutMode = useBoardStore((s) => s.cutMode)
@@ -27,7 +30,7 @@ function PaneTree({ node, gesture }: TreeProps) {
     return (
       <Pane
         // A different note (template, import, undo) gets a fresh editor.
-        key={note.id}
+        key={`${note.id}:${boardRevision}`}
         note={note}
         focused={focusedNoteId === note.id}
         cutMode={cutMode}
@@ -49,11 +52,11 @@ function PaneTree({ node, gesture }: TreeProps) {
         } as CSSProperties
       }
     >
-      <div className="pane-split__child pane-split__child--first">
+      <div className="pane-split__child pane-split__child--first" hidden={Boolean(focusModeNoteId && !collectNoteIds(node.first).includes(focusModeNoteId))}>
         <PaneTree node={node.first} gesture={gesture} />
       </div>
       <div className="pane-gutter" aria-hidden />
-      <div className="pane-split__child pane-split__child--second">
+      <div className="pane-split__child pane-split__child--second" hidden={Boolean(focusModeNoteId && !collectNoteIds(node.second).includes(focusModeNoteId))}>
         <PaneTree node={node.second} gesture={gesture} />
       </div>
     </div>
@@ -61,6 +64,7 @@ function PaneTree({ node, gesture }: TreeProps) {
 }
 
 export function Board() {
+  const focusModeNoteId = useBoardStore((s) => s.focusModeNoteId)
   const root = useBoardStore((s) => s.root)
   const cutMode = useBoardStore((s) => s.cutMode)
   const cutAnchor = useBoardStore((s) => s.cutAnchor)
@@ -78,7 +82,7 @@ export function Board() {
 
   return (
     <div
-      className={`board${cutMode ? ' board--cut' : ''}${cutAnchor ? ' board--anchored' : ''}`}
+      className={`board${focusModeNoteId ? ' board--focus' : ''}${cutMode ? ' board--cut' : ''}${cutAnchor ? ' board--anchored' : ''}`}
     >
       <PaneTree node={root} gesture={gesture} />
     </div>

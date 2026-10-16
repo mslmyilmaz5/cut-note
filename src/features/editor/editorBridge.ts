@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/react'
 import { DEFAULT_NOTE_STYLE, type NoteColor, type NoteStyle } from '../board/types'
 import type { StyleAction } from '../notes/store'
+import { DEFAULT_LINE_HEIGHT, readLineHeight } from './lineHeight'
 import {
   cycleEditorStyle,
   readActiveStyle,
@@ -157,5 +158,18 @@ export function getActiveEditorTextColor(
 }
 
 export function notifyEditorSelectionChanged() {
+  emit()
+}
+
+export function getActiveEditorLineHeight(focusedNoteId?: string | null): string {
+  const editor = resolveStyleEditor(focusedNoteId)
+  return editor ? readLineHeight(editor) : DEFAULT_LINE_HEIGHT
+}
+
+export function setActiveEditorLineHeight(value: string, focusedNoteId?: string | null): void {
+  const editor = resolveStyleEditor(focusedNoteId)
+  if (!editor) return
+  // Keep the dropdown focused and the existing editor selection intact.
+  editor.commands.setLineHeight(value)
   emit()
 }

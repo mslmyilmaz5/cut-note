@@ -1,4 +1,5 @@
 import type { BoardSnapshot, BoardTheme, Note, PaneNode } from '../board/types'
+import { collectNoteIds } from '../board/splitTree'
 import { normalizeNote } from '../notes/format'
 import {
   boardToTemplateLayout,
@@ -43,6 +44,10 @@ export function serializeCutNote(doc: CutNoteDocument): string {
   return `${JSON.stringify(doc, null, 2)}\n`
 }
 
+function validRatio(ratio: unknown): ratio is number {
+  return typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0 && ratio < 1
+}
+
 function isPaneNode(value: unknown): value is PaneNode {
   if (!value || typeof value !== 'object') return false
   const node = value as PaneNode
@@ -51,7 +56,7 @@ function isPaneNode(value: unknown): value is PaneNode {
     return (
       typeof node.id === 'string' &&
       (node.direction === 'row' || node.direction === 'column') &&
-      typeof node.ratio === 'number' &&
+      validRatio(node.ratio) &&
       isPaneNode(node.first) &&
       isPaneNode(node.second)
     )
@@ -66,7 +71,7 @@ function isTemplatePane(value: unknown): value is TemplatePane {
   if (node.type === 'split') {
     return (
       (node.direction === 'row' || node.direction === 'column') &&
-      typeof node.ratio === 'number' &&
+      validRatio(node.ratio) &&
       isTemplatePane(node.first) &&
       isTemplatePane(node.second)
     )
@@ -108,12 +113,10 @@ export function parseCutNote(raw: string): CutNoteDocument {
     throw new Error('Cut Note document is missing notes.')
   }
 
-  const notes = Object.fromEntries(
-    Object.entries(data.notes).map(([id, note]) => [
-      id,
-      normalizeNote(note as Note),
-    ]),
-  )
+  const notes = normalizeNotes(data.notes)
+  if (!notes || collectNoteIds(data.root).some((id) => !notes[id])) {
+    throw new Error('Cut Note document layout does not match its notes.')
+  }
 
   const focusedNoteId =
     typeof data.focusedNoteId === 'string' && notes[data.focusedNoteId]
@@ -161,10 +164,42 @@ export function normalizeTemplate(raw: BoardTemplate & {
   }
 }
 
+function normalizeNotes(value: unknown): Record<string, Note> | null {
+  if (!value || typeof value !== 'object') return null
+  const notes: Record<string, Note> = {}
+  for (const [id, note] of Object.entries(value)) {
+    if (!note || typeof note !== 'object') return null
+    notes[id] = normalizeNote({ ...(note as Note), id })
+  }
+  return notes
+}
+
+/** Drop a corrupt autosave instead of opening a board that cannot render. */
+export function normalizeStoredBoard(
+  saved: unknown,
+): (BoardSnapshot & { theme: BoardTheme }) | null {
+  if (!saved || typeof saved !== 'object') return null
+  const data = saved as Partial<BoardSnapshot>
+  if (!isPaneNode(data.root)) return null
+  const notes = normalizeNotes(data.notes)
+  if (!notes || collectNoteIds(data.root).some((id) => !notes[id])) return null
+  const focusedNoteId =
+    typeof data.focusedNoteId === 'string' && notes[data.focusedNoteId]
+      ? data.focusedNoteId
+      : Object.keys(notes)[0]
+  if (!focusedNoteId) return null
+  return {
+    root: data.root,
+    notes,
+    focusedNoteId,
+    theme: data.theme === 'white' ? 'white' : 'black',
+  }
+}
+
 export function suggestedFileName(name: string): string {
   const slug = name
     .trim()
-    .replace(/[^\w\s-]+/g, '')
+    .replace(/[^\p{L}\p{N}\s-]+/gu, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')

@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import {
   boardToCutNoteDocument,
+  normalizeStoredBoard,
   normalizeTemplate,
+  parseCutNote,
 } from '../document/cutnote'
 import { createId } from '../../lib/id'
 import { openCutNoteFile, saveCutNoteFile } from '../../lib/documentFile'
@@ -27,14 +29,19 @@ import {
   type NoteStyle,
   type PaneNode,
 } from '../board/types'
-import { cycleActiveEditorStyle } from '../editor/editorBridge'
+import { cycleActiveEditorStyle, getEditorForNote } from '../editor/editorBridge'
+import { extractEditorContent } from '../editor/contentCut'
+import { mergePanes, movePane, type PanePlacement } from '../board/operations'
+import {
+  isBuiltinTemplateId,
+  mergeBuiltinTemplates,
+} from '../templates/builtins'
 import {
   boardToTemplateLayout,
   countTemplatePanes,
   instantiateTemplate,
 } from '../templates/layout'
 import type { BoardTemplate } from '../templates/types'
-import { normalizeNote } from './format'
 
 const HISTORY_LIMIT = 50
 
@@ -43,6 +50,13 @@ export type StyleAction = 'font' | 'size' | 'weight' | 'align' | 'list' | 'color
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 type BoardStore = {
+  focusModeNoteId: string | null
+  boardRevision: number
+  toggleFocus: (id: string) => void
+  exitFocus: () => void
+  cutContent: (id: string, direction: CutDirection) => void
+  moveNote: (sourceId: string, targetId: string, placement: PanePlacement) => void
+  mergeNotes: (sourceId: string, targetId: string) => void
   root: PaneNode
   notes: Record<string, Note>
   focusedNoteId: string
@@ -74,7 +88,9 @@ type BoardStore = {
   setTemplatesOpen: (open: boolean) => void
   saveCurrentAsTemplate: (name: string, withNotes: boolean) => void
   saveCutNoteDocument: (name: string) => Promise<boolean>
+  newCutNoteDocument: (saveName?: string) => Promise<boolean>
   importCutNoteDocument: () => Promise<boolean>
+  openCutNoteRaw: (raw: string) => boolean
   applyTemplate: (id: string) => void
   deleteTemplate: (id: string) => void
   documentError: string | null
@@ -143,11 +159,83 @@ function schedulePersist(get: () => BoardStore) {
 }
 
 function scheduleTemplatesPersist(templates: BoardTemplate[]) {
-  void saveTemplates(templates)
+  void saveTemplates(templates.filter((item) => !isBuiltinTemplateId(item.id)))
+}
+
+/** Layout/content changes are one atomic, persistent board-history entry. */
+function commitBoardChange(next: BoardSnapshot | null) {
+  if (!next) return
+  const state = useBoardStore.getState()
+  useBoardStore.setState({
+    ...next,
+    past: [...state.past, snapshotOf(state)].slice(-HISTORY_LIMIT),
+    future: [],
+    boardRevision: state.boardRevision + 1,
+    focusModeNoteId: null,
+    cutMode: false,
+    cutAnchor: null,
+    cutPreview: null,
+  })
+  schedulePersist(useBoardStore.getState)
+}
+
+function applyCutNoteDocument(doc: ReturnType<typeof parseCutNote>) {
+  const state = useBoardStore.getState()
+  const past = [
+    ...state.past,
+    snapshotOf({
+      root: state.root,
+      notes: state.notes,
+      focusedNoteId: state.focusedNoteId,
+    }),
+  ].slice(-HISTORY_LIMIT)
+
+  useBoardStore.setState({
+    root: doc.root,
+    notes: doc.notes,
+    focusedNoteId: doc.focusedNoteId,
+    theme: doc.theme,
+    cutMode: false,
+    cutAnchor: null,
+    cutPreview: null,
+    past,
+    boardRevision: state.boardRevision + 1,
+    focusModeNoteId: null,
+    future: [],
+    documentError: null,
+  })
+  schedulePersist(useBoardStore.getState)
 }
 
 export const useBoardStore = create<BoardStore>((set, get) => ({
   ...createInitialState(),
+  focusModeNoteId: null,
+  boardRevision: 0,
+  toggleFocus: (id) => {
+    if (!get().notes[id]) return
+    set({ focusModeNoteId: get().focusModeNoteId === id ? null : id, focusedNoteId: id, cutMode: false, cutAnchor: null, cutPreview: null })
+    getEditorForNote(id)?.commands.focus()
+  },
+  exitFocus: () => {
+    set({ focusModeNoteId: null })
+    getEditorForNote(get().focusedNoteId)?.commands.focus()
+  },
+  cutContent: (id, direction) => {
+    const state = get()
+    const source = state.notes[id]
+    const editor = getEditorForNote(id)
+    if (!source || !editor) return
+    const content = extractEditorContent(editor)
+    if (!content) return
+    const note = createNote(content.extracted, source.style)
+    commitBoardChange({
+      root: splitLeaf(state.root, id, direction, 0.5, 'first', note.id),
+      notes: { ...state.notes, [id]: { ...source, body: content.remaining, updatedAt: Date.now() }, [note.id]: note },
+      focusedNoteId: note.id,
+    })
+  },
+  moveNote: (sourceId, targetId, placement) => commitBoardChange(movePane(snapshotOf(get()), sourceId, targetId, placement)),
+  mergeNotes: (sourceId, targetId) => commitBoardChange(mergePanes(snapshotOf(get()), sourceId, targetId)),
   theme: 'black',
   cutMode: false,
   cutAnchor: null,
@@ -165,24 +253,44 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   saveMenuOpen: false,
   themeReveal: null,
 
+  newCutNoteDocument: async (saveName) => {
+    if (saveName !== undefined) {
+      if (!saveName.trim() || !await get().saveCutNoteDocument(saveName.trim())) return false
+    }
+    set({
+      ...createInitialState(),
+      boardRevision: get().boardRevision + 1,
+      focusModeNoteId: null,
+      cutMode: false,
+      cutAnchor: null,
+      cutPreview: null,
+      cutFlashNoteId: null,
+      notesOpen: false,
+      templatesOpen: false,
+      saveMenuOpen: false,
+      documentError: null,
+      past: [],
+      future: [],
+    })
+    schedulePersist(get)
+    return true
+  },
+
   hydrate: async () => {
     const [saved, templatesRaw] = await Promise.all([
       loadBoard(),
       loadTemplates(),
     ])
-    const templates = templatesRaw.map(normalizeTemplate)
-    if (saved && saved.root && saved.notes && saved.focusedNoteId) {
-      const notes = Object.fromEntries(
-        Object.entries(saved.notes).map(([id, note]) => [
-          id,
-          normalizeNote(note as Note),
-        ]),
-      )
+    const templates = mergeBuiltinTemplates(
+      templatesRaw.map(normalizeTemplate),
+    )
+    const board = normalizeStoredBoard(saved)
+    if (board) {
       set({
-        root: saved.root,
-        notes,
-        focusedNoteId: saved.focusedNoteId,
-        theme: saved.theme === 'white' ? 'white' : 'black',
+        root: board.root,
+        notes: board.notes,
+        focusedNoteId: board.focusedNoteId,
+        theme: board.theme,
         templates,
         hydrated: true,
       })
@@ -220,7 +328,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
   setCutMode: (on) =>
     set(
       on
-        ? { cutMode: true }
+        ? { cutMode: true, focusModeNoteId: null }
         : { cutMode: false, cutAnchor: null, cutPreview: null },
     ),
 
@@ -294,31 +402,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     try {
       const result = await openCutNoteFile()
       if (!result) return false
-
-      const { doc } = result
-      const state = get()
-      const past = [
-        ...state.past,
-        snapshotOf({
-          root: state.root,
-          notes: state.notes,
-          focusedNoteId: state.focusedNoteId,
-        }),
-      ].slice(-HISTORY_LIMIT)
-
-      set({
-        root: doc.root,
-        notes: doc.notes,
-        focusedNoteId: doc.focusedNoteId,
-        theme: doc.theme,
-        cutMode: false,
-        cutAnchor: null,
-        cutPreview: null,
-        past,
-        future: [],
-        documentError: null,
-      })
-      schedulePersist(get)
+      applyCutNoteDocument(result.doc)
       return true
     } catch (error) {
       set({
@@ -326,6 +410,21 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
           error instanceof Error
             ? error.message
             : 'Could not import the .cutnote file.',
+      })
+      return false
+    }
+  },
+
+  openCutNoteRaw: (raw) => {
+    try {
+      applyCutNoteDocument(parseCutNote(raw))
+      return true
+    } catch (error) {
+      set({
+        documentError:
+          error instanceof Error
+            ? error.message
+            : 'Could not open the .cutnote file.',
       })
       return false
     }
@@ -354,19 +453,22 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       cutAnchor: null,
       cutPreview: null,
       past,
+      boardRevision: state.boardRevision + 1,
+      focusModeNoteId: null,
       future: [],
     })
     schedulePersist(get)
   },
 
   deleteTemplate: (id) => {
+    if (isBuiltinTemplateId(id)) return
     const templates = get().templates.filter((item) => item.id !== id)
     set({ templates })
     scheduleTemplatesPersist(templates)
   },
 
   setFocusedNoteId: (id) => {
-    set({ focusedNoteId: id })
+    set({ focusedNoteId: id, focusModeNoteId: get().focusModeNoteId ? id : null })
     schedulePersist(get)
   },
 
@@ -374,6 +476,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     const current = get().notes[id]
     if (!current || current.body === body) return
     set({
+      future: [],
       notes: {
         ...get().notes,
         [id]: { ...current, body, updatedAt: Date.now() },
@@ -386,6 +489,7 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
     const current = get().notes[id]
     if (!current) return
     set({
+      future: [],
       notes: {
         ...get().notes,
         [id]: {
@@ -435,6 +539,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       cutMode: false,
       cutFlashNoteId: preview.noteId,
       past,
+      boardRevision: state.boardRevision + 1,
+      focusModeNoteId: null,
       future: [],
     })
     schedulePersist(get)
@@ -485,6 +591,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       cutPreview:
         state.cutPreview?.noteId === id ? null : state.cutPreview,
       past,
+      boardRevision: state.boardRevision + 1,
+      focusModeNoteId: null,
       future: [],
     })
     schedulePersist(get)
@@ -500,6 +608,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       focusedNoteId: state.focusedNoteId,
     })
     set({
+      boardRevision: state.boardRevision + 1,
+      focusModeNoteId: null,
       root: previous.root,
       notes: previous.notes,
       focusedNoteId: previous.focusedNoteId,
@@ -522,6 +632,8 @@ export const useBoardStore = create<BoardStore>((set, get) => ({
       focusedNoteId: state.focusedNoteId,
     })
     set({
+      boardRevision: state.boardRevision + 1,
+      focusModeNoteId: null,
       root: next.root,
       notes: next.notes,
       focusedNoteId: next.focusedNoteId,
